@@ -1,29 +1,20 @@
 import requests
 from io import BytesIO, FileIO
-from os import getenv
 from pathlib import Path
 from typing import Iterable, Union
 
-from github import Github
 from github.ContentFile import ContentFile
+from github_wrappers import get_repo
+from helpers import bytes_to_str
 
-output_folder_path = Path.cwd()
-output_path = output_folder_path / "PandaPaxxy_no_mkb_output.txt"
-
-github_user_name = getenv("GH_UN")
-assert github_user_name
-
-github_token = getenv("GH_TOKEN")
-assert github_token
-
-g = Github(github_user_name, github_token)
-repo = g.get_repo("48klocs/dim-wish-list-sources")
-
-content_files: list[ContentFile] = repo.get_contents("PandaPaxxy")
+OUTPUT_FOLDER_PATH = Path.cwd()
+OUTPUT_PATH = OUTPUT_FOLDER_PATH / "PandaPaxxy_no_mkb_output.txt"
 
 
-def bytes_to_str(x: bytes) -> str:
-    return x.decode("utf-8")
+TITLE_LINES: list[str] = []
+DESCRIPTION_LINES: list[str] = []
+ROLL_LINES: list[str] = []
+UNIQUE_ROLLS: set[str] = set()
 
 
 def clean_line(line: Union[str, bytes], debug: bool = False) -> str:
@@ -52,36 +43,37 @@ def clean_leading_line(line: Union[str, bytes], debug: bool = False) -> str:
     return cleaned
 
 
-title_lines: list[str] = []
-description_lines: list[str] = []
-roll_lines: list[str] = []
-unique_rolls: set[str] = set()
-
-
 def parse_contents(lines: Iterable[bytes]) -> int:
-    roll_count = 0
+    roll_count = len(list(UNIQUE_ROLLS))
+
     for index, line in enumerate(lines):
         if index == 0:
-            title_lines.append(clean_leading_line(line, True))
+            TITLE_LINES.append(clean_leading_line(line))
         elif index == 1:
-            description_lines.append(clean_leading_line(line, True))
+            DESCRIPTION_LINES.append(clean_leading_line(line))
         else:
             add_line = True
             roll_line = clean_line(line)
             if roll_line.startswith("dimwishlist:"):
-                if roll_line in unique_rolls:
+                if roll_line in UNIQUE_ROLLS:
                     add_line = False
                 else:
-                    roll_count += 1
-                    unique_rolls.add(roll_line)
+                    UNIQUE_ROLLS.add(roll_line)
 
             if add_line:
-                roll_lines.append(roll_line)
+                ROLL_LINES.append(roll_line)
 
-    print(f"Found {roll_count} rolls.")
+    print(f"Found {len(list(UNIQUE_ROLLS)) - roll_count} rolls.")
 
 
-contents: list[ContentFile] = sorted(content_files, key=lambda f: f.last_modified)
+def write_line(file: FileIO, line: str) -> None:
+    file.write(f"{line}\n".encode("utf-8"))
+
+
+repo = get_repo("48klocs", "dim-wish-list-sources")
+contents: list[ContentFile] = sorted(
+    repo.get_contents("PandaPaxxy"), key=lambda f: f.last_modified
+)
 for content in contents:
     if "mkb" in content.name:
         print(f"Skipping {content.name}... for mouse and keyboard.")
@@ -98,18 +90,12 @@ for content in contents:
             parse_contents(remote_contents.iter_lines())
 
 
-def write_line(file: FileIO, line: str) -> None:
-    file.write(f"{line}\n".encode("utf-8"))
-
-
-with FileIO(output_path, mode="wb+") as output_file:
-    write_line(output_file, f"title:{'|'.join(title_lines)}")
-    write_line(output_file, f"description:{'|'.join(description_lines)}")
-    for line in roll_lines:
+with FileIO(OUTPUT_PATH, mode="wb+") as output_file:
+    write_line(output_file, f"title:{'|'.join(TITLE_LINES)}")
+    write_line(output_file, f"description:{'|'.join(DESCRIPTION_LINES)}")
+    for line in ROLL_LINES:
         write_line(output_file, line)
 
 print()
-print(f"{str(output_path)} ready for DIM.")
-
-total_roll_count = len(list(unique_rolls))
-print(f"Wish list contains {total_roll_count} rolls.")
+print(f"{str(OUTPUT_PATH)} ready for DIM.")
+print(f"Wish list contains {len(list(UNIQUE_ROLLS))} rolls.")
