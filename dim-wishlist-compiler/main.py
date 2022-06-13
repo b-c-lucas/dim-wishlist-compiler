@@ -1,8 +1,11 @@
 import requests
+from collections import defaultdict
+from datetime import datetime
 from io import BytesIO, FileIO
 from pathlib import Path
 from typing import Iterable, Union
 
+from github.Commit import Commit
 from github.ContentFile import ContentFile
 from github_wrappers import get_repo
 from helpers import bytes_to_str
@@ -71,10 +74,47 @@ def write_line(file: FileIO, line: str) -> None:
 
 
 repo = get_repo("48klocs", "dim-wish-list-sources")
-contents: list[ContentFile] = sorted(
-    repo.get_contents("PandaPaxxy"), key=lambda f: f.last_modified
-)
-for content in contents:
+repo_contents: list[ContentFile] = repo.get_contents("PandaPaxxy")
+
+filtered_contents: dict[str, ContentFile] = {
+    c.path: c for c in repo_contents if "mkb" not in c.name
+}
+
+unhandled_file_names: set[str] = set(filtered_contents.keys())
+
+commit_date_files: dict[datetime, set[str]] = defaultdict(set)
+
+print("Ordering files by original commit date...")
+
+commits: list[Commit] = repo.get_commits()
+for commit in sorted(commits, key=lambda c: c.commit.author.date):
+    for file in commit.files:
+        if file.filename not in unhandled_file_names:
+            continue
+
+        print(f"Found commit '{commit.commit.sha}' for file '{file.filename}'.")
+
+        unhandled_file_names.remove(file.filename)
+        commit_date_files[commit.commit.author.date].add(file.filename)
+
+    if len(list(unhandled_file_names)) == 0:
+        break
+
+
+if len(list(unhandled_file_names)) > 0:
+    raise Exception(
+        f"All files not found in commit history: {list(unhandled_file_names)}"
+    )
+
+print("Commits found for all files.")
+print()
+
+ordered_contents: list[ContentFile] = []
+for commit_date in sorted(commit_date_files.keys()):
+    for file_name in sorted(commit_date_files[commit_date]):
+        ordered_contents.append(filtered_contents[file_name])
+
+for content in ordered_contents:
     if "mkb" in content.name:
         print(f"Skipping {content.name}... for mouse and keyboard.")
         continue
